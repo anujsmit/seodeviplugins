@@ -1,0 +1,42 @@
+.seodevi-account-box {
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.seodevi-feature-list li {
+    margin-bottom: 6px;
+    font-size: 14px;
+}
+
+.seodevi-pricing {
+    display: flex;
+    gap: 20px;
+    margin-top: 20px;
+}
+
+.pricing-card {
+    background: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    flex: 1;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+}
+
+.pricing-card.highlight {
+    border: 2px solid #2271b1;
+}
+
+.pricing-card .price {
+    font-size: 22px;
+    font-weight: bold;
+    margin: 10px 0;
+}
+
+.pricing-card ul {
+    padding-left: 18px;
+}
+
+.seodevi-steps li {
+    margin-bottom: 8px;
+}
