@@ -1,330 +1,288 @@
 <?php
 /**
- * Plugin Name: SEODevi Smart Links
- * Description: Internal & External Link Suggestions for SEO. Features a credit-based system for editorial link building.
- * Version: 1.0.0
- * Author: SEODevi
+ * Plugin Name:       SEODevi Smart Links
+ * Plugin URI:        https://seodevi.com
+ * Description:       Internal & External Link Suggestions for SEO with credit-based system.
+ * Version:           1.0.0
+ * Author:            SEODevi
+ * Author URI:        https://seodevi.com
+ * License:           GPL-2.0+
+ * Text Domain:       dashboard
  */
 
-if (!defined('ABSPATH')) exit;
+if (!defined('ABSPATH')) {
+    exit; // Exit if accessed directly
+}
 
 /* ===============================
    CONSTANTS & DEFINITIONS
 ================================ */
+define('SEODEVI_VERSION', '1.0.0');
 define('SEODEVI_PATH', plugin_dir_path(__FILE__));
 define('SEODEVI_URL', plugin_dir_url(__FILE__));
-// API Base URL - change this to your actual API server
-define('SEODEVI_API_BASE', 'http://localhost:5000/api/auth');
 
-// Get complete API URLs
+// IMPORTANT: Change these to your production API URLs
+define('SEODEVI_API_BASE', 'http://localhost:5000/api/auth/'); // Auth endpoints
+define('SEODEVI_LINK_API_BASE', 'http://localhost:5000/api/');
+
 function seodevi_get_api_url($endpoint = '') {
-    $base = defined('SEODEVI_API_BASE') ? SEODEVI_API_BASE : 'http://localhost:5000/api/auth';
-    return rtrim($base, '/') . '/' . ltrim($endpoint, '/');
+    return rtrim(SEODEVI_API_BASE, '/') . '/' . ltrim($endpoint, '/');
 }
 
-// Get specific API endpoints
 function seodevi_get_login_url() {
     return seodevi_get_api_url('login');
 }
-
 function seodevi_get_register_url() {
     return seodevi_get_api_url('register');
 }
-
 function seodevi_get_profile_url() {
     return seodevi_get_api_url('profile');
 }
 
 /* ===============================
-   SESSION MANAGEMENT
+   SESSION & AUTH HELPERS
 ================================ */
-add_action('init', 'seodevi_start_session', 1);
-
 function seodevi_start_session() {
     if (!session_id() && !headers_sent()) {
         session_start();
     }
 }
+add_action('init', 'seodevi_start_session', 1);
 
-// Function to store token after login
 function seodevi_store_token($token, $user_data) {
-    if (!session_id() && !headers_sent()) {
-        session_start();
-    }
-    
-    $_SESSION['seodevi_token'] = $token;
-    $_SESSION['seodevi_user'] = $user_data;
-    $_SESSION['seodevi_token_expiry'] = time() + (7 * 24 * 60 * 60); // 7 days
-    
-    // Also store in options for persistence
+    seodevi_start_session();
+
+    $_SESSION['seodevi_token']        = $token;
+    $_SESSION['seodevi_user']         = $user_data;
+    $_SESSION['seodevi_token_expiry'] = time() + (7 * 24 * 60 * 60);
+
     update_option('seodevi_token', $token);
     update_option('seodevi_user_data', $user_data);
-    update_option('seodevi_last_login', current_time('timestamp'));
+    update_option('seodevi_last_login', time());
 }
 
-// Function to get current token
 function seodevi_get_token() {
-    if (!session_id() && !headers_sent()) {
-        session_start();
-    }
-    
-    // Check session first
-    if (isset($_SESSION['seodevi_token']) && 
-        isset($_SESSION['seodevi_token_expiry']) && 
-        $_SESSION['seodevi_token_expiry'] > time()) {
+    seodevi_start_session();
+
+    if (
+        isset($_SESSION['seodevi_token']) &&
+        isset($_SESSION['seodevi_token_expiry']) &&
+        $_SESSION['seodevi_token_expiry'] > time()
+    ) {
         return $_SESSION['seodevi_token'];
     }
-    
-    // Clear expired session
+
     if (isset($_SESSION['seodevi_token_expiry']) && $_SESSION['seodevi_token_expiry'] <= time()) {
         unset($_SESSION['seodevi_token']);
         unset($_SESSION['seodevi_user']);
         unset($_SESSION['seodevi_token_expiry']);
     }
-    
-    // Fallback to option with expiry check
+
     $token = get_option('seodevi_token', '');
-    $last_login = get_option('seodevi_last_login', 0);
-    
-    // Check if token is still valid (7 days)
-    if ($token && $last_login && (current_time('timestamp') - $last_login) < (7 * 24 * 60 * 60)) {
-        // Update session with option data
-        if (!session_id() && !headers_sent()) {
-            session_start();
-        }
-        $_SESSION['seodevi_token'] = $token;
-        $_SESSION['seodevi_user'] = get_option('seodevi_user_data', []);
+    $last_login = (int) get_option('seodevi_last_login', 0);
+
+    if ($token && $last_login && (time() - $last_login) < (7 * 24 * 60 * 60)) {
+        seodevi_start_session();
+        $_SESSION['seodevi_token']        = $token;
+        $_SESSION['seodevi_user']         = get_option('seodevi_user_data', []);
         $_SESSION['seodevi_token_expiry'] = $last_login + (7 * 24 * 60 * 60);
-        
         return $token;
     }
-    
+
     return '';
 }
 
-// Function to check if user is logged in
 function seodevi_is_logged_in() {
-    $token = seodevi_get_token();
-    return !empty($token);
+    return !empty(seodevi_get_token());
 }
 
-// Function to get user data
 function seodevi_get_user_data() {
-    if (!session_id() && !headers_sent()) {
-        session_start();
-    }
-    
-    if (isset($_SESSION['seodevi_user'])) {
-        return $_SESSION['seodevi_user'];
-    }
-    
-    return get_option('seodevi_user_data', []);
+    seodevi_start_session();
+    return isset($_SESSION['seodevi_user'])
+        ? $_SESSION['seodevi_user']
+        : get_option('seodevi_user_data', []);
 }
 
-// Function to logout
 function seodevi_logout() {
-    if (!session_id() && !headers_sent()) {
-        session_start();
-    }
-    
+    seodevi_start_session();
+
     unset($_SESSION['seodevi_token']);
     unset($_SESSION['seodevi_user']);
     unset($_SESSION['seodevi_token_expiry']);
-    
+
     delete_option('seodevi_token');
     delete_option('seodevi_user_data');
     delete_option('seodevi_last_login');
 }
 
 /* ===============================
-   EARLY AUTHENTICATION CHECK
+   EARLY REDIRECT FOR AUTH PAGES
 ================================ */
-add_action('admin_init', 'seodevi_check_authentication');
+add_action('admin_init', function () {
+    if (!isset($_GET['page'])) return;
 
-function seodevi_check_authentication() {
-    // Only check on SEODevi pages
-    if (!isset($_GET['page'])) {
-        return;
-    }
-    
-    $current_page = sanitize_text_field($_GET['page']);
+    $page = sanitize_text_field($_GET['page']);
     $auth_pages = ['seodevi-login', 'seodevi-signup'];
-    
-    // If user is logged in and tries to access login or signup pages, redirect to dashboard
-    if (seodevi_is_logged_in() && in_array($current_page, $auth_pages)) {
-        wp_redirect(admin_url('admin.php?page=seodevi-smart-links'));
-        exit; // Always exit after wp_redirect
+
+    if (seodevi_is_logged_in() && in_array($page, $auth_pages)) {
+        wp_safe_redirect(admin_url('admin.php?page=dashboard'));
+        exit;
     }
-}
+});
 
 /* ===============================
-   ADMIN MENU & SUBPAGES
+   ADMIN MENU
 ================================ */
 add_action('admin_menu', function () {
-    // Main Dashboard
     add_menu_page(
         'SEODevi Smart Links',
         'SEODevi Links',
         'manage_options',
-        'seodevi-smart-links',
+        'dashboard',
         'seodevi_render_dashboard',
         'dashicons-admin-links',
         30
     );
 
-    // Hidden Login Page
-    add_submenu_page(
-        null, // No parent (hidden from menu)
-        'SEODevi Login',
-        'Login',
-        'manage_options',
-        'seodevi-login',
-        'seodevi_render_login'
-    );
-
-    // Hidden Signup Page
-    add_submenu_page(
-        null,
-        'SEODevi Signup',
-        'Signup',
-        'manage_options',
-        'seodevi-signup',
-        'seodevi_render_signup'
-    );
+    add_submenu_page(null, 'SEODevi Login', 'Login', 'manage_options', 'seodevi-login', 'seodevi_render_login');
+    add_submenu_page(null, 'SEODevi Signup', 'Signup', 'manage_options', 'seodevi-signup', 'seodevi_render_signup');
+    add_submenu_page(null, 'SEODevi Pricing', 'Pricing', 'manage_options', 'seodevi-pricing', 'seodevi_render_pricing');
+    add_submenu_page(null, 'SEODevi About', 'About', 'manage_options', 'seodevi-about', 'seodevi_render_about');
 });
 
-/* ===============================
-   RENDER CALLBACKS
-================================ */
-
-/**
- * Renders the main dashboard 
- */
-function seodevi_render_dashboard() {
-    if (file_exists(SEODEVI_PATH . 'admin/Dashboard.php')) {
-        include SEODEVI_PATH . 'admin/Dashboard.php';
+function seodevi_render_page($template) {
+    $path = SEODEVI_PATH . 'admin/' . $template . '.php';
+    if (file_exists($path)) {
+        include $path;
     } else {
-        echo '<div class="error"><p>Dashboard file missing.</p></div>';
+        echo '<div class="notice notice-error"><p>Template not found: ' . esc_html($template) . '</p></div>';
     }
 }
 
-/**
- * Renders the login page 
- */
-function seodevi_render_login() {
-    if (file_exists(SEODEVI_PATH . 'admin/Login.php')) {
-        include SEODEVI_PATH . 'admin/Login.php';
-    } else {
-        echo '<div class="error"><p>Login file missing.</p></div>';
-    }
-}
-
-/**
- * Renders the signup page 
- */
-function seodevi_render_signup() {
-    if (file_exists(SEODEVI_PATH . 'admin/Signup.php')) {
-        include SEODEVI_PATH . 'admin/Signup.php';
-    } else {
-        echo '<div class="error"><p>Signup file missing.</p></div>';
-    }
-}
+function seodevi_render_dashboard() { seodevi_render_page('Dashboard'); }
+function seodevi_render_login() { seodevi_render_page('Login'); }
+function seodevi_render_signup() { seodevi_render_page('Signup'); }
+function seodevi_render_pricing() { seodevi_render_page('Pricing'); }
+function seodevi_render_about() { seodevi_render_page('About'); }
 
 /* ===============================
-   ASSETS (CSS & JS)
+   ASSETS
 ================================ */
-add_action('admin_enqueue_scripts', function ($hook) {
-    // Only load assets on SEODevi related pages
+add_action('admin_enqueue_scripts', 'seodevi_enqueue_admin_assets');
+
+function seodevi_enqueue_admin_assets($hook) {
     $seodevi_pages = [
-        'toplevel_page_seodevi-smart-links',
+        'toplevel_page_dashboard',
         'admin_page_seodevi-login',
-        'admin_page_seodevi-signup'
+        'admin_page_seodevi-signup',
+        'admin_page_seodevi-pricing',
+        'admin_page_seodevi-about',
     ];
 
-    if (!in_array($hook, $seodevi_pages)) return;
+    if (!in_array($hook, $seodevi_pages, true)) return;
 
-    // Load Styles 
-    wp_enqueue_style(
-        'seodevi-admin-css',
-        SEODEVI_URL . 'admin.css',
-        [],
-        '1.0.0'
-    );
+    wp_enqueue_style('seodevi-admin-css', SEODEVI_URL . 'admin.css', [], SEODEVI_VERSION);
+    wp_enqueue_style('seodevi-header-css', SEODEVI_URL . 'assets/css/admin-header.css', [], SEODEVI_VERSION);
 
-    // Load Scripts 
-    wp_enqueue_script(
-        'seodevi-admin-js',
-        SEODEVI_URL . 'admin.js',
-        ['jquery'],
-        '1.0.0',
-        true
-    );
+    wp_enqueue_script('seodevi-admin-js', SEODEVI_URL . 'assets/js/admin.js', ['jquery'], SEODEVI_VERSION, true);
 
-    // Pass environment variables to JavaScript 
     wp_localize_script('seodevi-admin-js', 'seodeviConfig', [
-        'apiBase' => seodevi_get_api_url(),
-        'loginUrl' => seodevi_get_login_url(),
+        'apiBase'     => SEODEVI_API_BASE,
+        'loginUrl'    => seodevi_get_login_url(),
         'registerUrl' => seodevi_get_register_url(),
-        'profileUrl' => seodevi_get_profile_url(),
-        'ajaxUrl' => admin_url('admin-ajax.php'),
-        'dashboardUrl' => admin_url('admin.php?page=seodevi-smart-links'),
-        'nonce' => wp_create_nonce('seodevi_admin_nonce')
+        'profileUrl'  => seodevi_get_profile_url(),
+        'dashboardUrl'=> admin_url('admin.php?page=dashboard'),
+        'ajaxUrl'     => admin_url('admin-ajax.php'),
+        'nonce'       => wp_create_nonce('seodevi_admin_nonce'),
+        'logoutUrl'   => admin_url('admin.php?page=seodevi-login'),
     ]);
-});
+}
 
 /* ===============================
    AJAX HANDLERS
 ================================ */
 add_action('wp_ajax_seodevi_store_auth', 'seodevi_ajax_store_auth');
 add_action('wp_ajax_seodevi_logout', 'seodevi_ajax_logout');
-add_action('wp_ajax_seodevi_get_profile', 'seodevi_ajax_get_profile');
 add_action('wp_ajax_seodevi_check_auth', 'seodevi_ajax_check_auth');
+add_action('wp_ajax_seodevi_get_profile', 'seodevi_ajax_get_profile');
+add_action('wp_ajax_nopriv_seodevi_store_auth', 'seodevi_ajax_store_auth');
 
 function seodevi_ajax_store_auth() {
     check_ajax_referer('seodevi_admin_nonce', 'nonce');
-    
-    $token = isset($_POST['token']) ? sanitize_text_field($_POST['token']) : '';
-    $user_data = isset($_POST['user_data']) ? json_decode(stripslashes($_POST['user_data']), true) : [];
-    
-    if ($token && $user_data) {
+    $token = sanitize_text_field($_POST['token'] ?? '');
+    $user_data = json_decode(stripslashes($_POST['user_data'] ?? '[]'), true);
+
+    if ($token && is_array($user_data)) {
         seodevi_store_token($token, $user_data);
         wp_send_json_success(['message' => 'Authentication stored']);
-    } else {
-        wp_send_json_error(['message' => 'Invalid data received']);
     }
+    wp_send_json_error(['message' => 'Invalid data']);
 }
 
 function seodevi_ajax_logout() {
-    // Check nonce for security
-    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'seodevi_admin_nonce')) {
-        wp_send_json_error(['message' => 'Invalid security token']);
-    }
-    
+    check_ajax_referer('seodevi_admin_nonce', 'nonce');
     seodevi_logout();
     wp_send_json_success(['message' => 'Logged out successfully']);
 }
 
+function seodevi_ajax_check_auth() {
+    check_ajax_referer('seodevi_admin_nonce', 'nonce');
+    wp_send_json_success(['logged_in' => seodevi_is_logged_in()]);
+}
+
 function seodevi_ajax_get_profile() {
     check_ajax_referer('seodevi_admin_nonce', 'nonce');
-    
     $token = seodevi_get_token();
     if (!$token) {
         wp_send_json_error(['message' => 'Not authenticated']);
     }
-    
-    $user_data = seodevi_get_user_data();
-    wp_send_json_success(['user' => $user_data]);
+    wp_send_json_success(['user' => seodevi_get_user_data()]);
 }
 
-function seodevi_ajax_check_auth() {
-    check_ajax_referer('seodevi_admin_nonce', 'nonce');
-    
-    if (seodevi_is_logged_in()) {
-        wp_send_json_success(['logged_in' => true]);
+/* ===============================
+   REST API PROXY FOR DASHBOARD
+================================ */
+add_action('rest_api_init', 'seodevi_register_proxy_route');
+
+function seodevi_register_proxy_route() {
+    register_rest_route('seodevi/v1', '/proxy/(?P<path>[\w/-]+)', [
+        'methods' => ['GET', 'POST'],
+        'callback' => 'seodevi_api_proxy_callback',
+        'permission_callback' => fn() => current_user_can('manage_options'),
+    ]);
+}
+
+function seodevi_api_proxy_callback(WP_REST_Request $request) {
+    $path = $request->get_param('path');
+    $url = rtrim(SEODEVI_LINK_API_BASE, '/') . '/' . ltrim($path, '/');
+
+    $method = $request->get_method();
+    $headers = ['Content-Type' => 'application/json'];
+
+    $token = seodevi_get_token();
+    if ($token) $headers['Authorization'] = 'Bearer ' . $token;
+
+    $args = [
+        'headers' => $headers,
+        'timeout' => 30,
+    ];
+
+    if ($method === 'POST') {
+        $args['body'] = $request->get_body();
+        $response = wp_remote_post($url, $args);
     } else {
-        wp_send_json_success(['logged_in' => false]);
+        $response = wp_remote_get($url, $args);
     }
-}
 
-// Also add for non-logged in users
-add_action('wp_ajax_nopriv_seodevi_store_auth', 'seodevi_ajax_store_auth');
+    if (is_wp_error($response)) {
+        return new WP_Error('api_error', $response->get_error_message(), ['status' => 500]);
+    }
+
+    $response_code = wp_remote_retrieve_response_code($response);
+    $body = wp_remote_retrieve_body($response);
+    $data = json_decode($body, true);
+
+    return is_array($data)
+        ? new WP_REST_Response($data, $response_code)
+        : new WP_REST_Response($body, $response_code);
+}

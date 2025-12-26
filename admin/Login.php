@@ -99,7 +99,7 @@ if (seodevi_is_logged_in()) {
                                 action: 'seodevi_store_auth',
                                 nonce: seodeviConfig.nonce,
                                 token: response.token,
-                                user_data: JSON.stringify(response.user) // Sending the full backend user object
+                                user_data: JSON.stringify(response.user)
                             },
                             success: function() {
                                 window.location.href = seodeviConfig.dashboardUrl;
